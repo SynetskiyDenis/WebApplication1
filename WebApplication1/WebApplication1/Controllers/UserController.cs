@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApplication1.Models;
+using WebApplication1.DbServices;
 
 namespace WebApplication1.Controllers
 {
@@ -11,52 +12,28 @@ namespace WebApplication1.Controllers
     [ApiController]
     public class UserController : ControllerBase
     {
-        //создаем список Пользователей с добавлением Пользователя superadmin
-        private static List<UserInfo> userInfoList =
-            new List<UserInfo> {
-                    new UserInfo {
-                    username = "superadmin",
-                    password = "pswd",
-                    email = "mail@gmail.com",
-                    isLogined = false
-                }
-            };
-           
-        private readonly LoginService _loginService; 
+        private  DBService _dbcon;
 
-        public UserController(LoginService loginService)
+        public UserController( DBService dbcon)
         {
-            _loginService = loginService;
-            _loginService.users = userInfoList;
+            _dbcon = dbcon;
         }
 
-        //функция проверки "LOGOUT" пользователя
-        private int CheckLogin()
-        {
-            var id = userInfoList.FindIndex(u => u.username == User.Identity.Name);
-
-            if (id< 0) return -2;
-
-            if (!userInfoList.ElementAt(id).isLogined) return -1;
-
-            return id;
-        }
-        
-        /*
-        // GET api/values
+         /*
+        // GET api/values 
         [HttpGet]
         public ActionResult<IEnumerable<UserInfo>> Get()
         {
-            return userInfoList;
+
         }
         */
-    
+
         //авторизация пользователя
         // POST api/user/token        
         [HttpPost("token")]
         public IActionResult Login(UserLogin userLogin)
         {
-            var jwtToken = _loginService.Login(userLogin);
+            var jwtToken = _dbcon.Login(userLogin);
 
             if (jwtToken == null) return Unauthorized();
 
@@ -65,85 +42,76 @@ namespace WebApplication1.Controllers
 
         //добавления нового пользователя
         // POST api/user
-        [Authorize]
+        [MyAuthorize]
         [HttpPost]
         public ActionResult<string> Post([FromBody] UserInfo userInfo)
         {
-            var id = CheckLogin();
-            switch (id)
+            if (_dbcon.FindUser(userInfo.username) != null)
             {
-                case -2: return BadRequest("There is no such users");
-                case -1: return Unauthorized();
-            }
+                return BadRequest("User " + userInfo.username + " already created");
+            }          
 
-            if (userInfoList.Any(u => u.username == userInfo.username))
-            {
-                return BadRequest("User " + userInfo.username + " already created"); 
-            }
+            var resAddUser = _dbcon.AddUser(userInfo);
 
-            userInfoList.Add(userInfo);
-
+            if (resAddUser!=null) return BadRequest(resAddUser);
+            
             return Ok("User " + userInfo.username + " was added successfully");
         }
 
         //изменение данных пользователя
         // PUT api/user
-        [Authorize]
+        [MyAuthorize]
         [HttpPut]
         public ActionResult<string> Put([FromBody] UserInfo userInfo)
         {
-            var id = CheckLogin();
-            switch (id)
+            var id = _dbcon.FindUser(User.Identity.Name);
+
+            if (id == null)
             {
-                case -2: return BadRequest("There is no such users");
-                case -1: return Unauthorized();
+                return BadRequest("User " + userInfo.username + " not found");
             }
 
-            userInfoList.ElementAt(id).username = userInfo.username;
-            userInfoList.ElementAt(id).password = userInfo.password;
-            userInfoList.ElementAt(id).email = userInfo.email;
+            var resUpdateUser = _dbcon.UpdateUser(Convert.ToInt32(id),userInfo);
+
+            if (resUpdateUser != null) return BadRequest(resUpdateUser);
 
             return Ok("User " + userInfo.username + " was updated successfully");
         }
 
         //Logout пользователя указаного в теле запроса
         // DELETE api/user
-        [Authorize]
+        [MyAuthorize]        
         [HttpDelete("token")]
         [MyActionConstraint(true)]
         public ActionResult<string> Delete([FromBody] UserLogout userLogout)
         {
-            var id = CheckLogin();
-            switch (id)
+            if (_dbcon.FindUser(userLogout.username) == null)
             {
-                case -2: return BadRequest("There is no such users");
-                case -1: return Unauthorized();
+                return BadRequest("There is no such user");
             }
 
-            id = userInfoList.FindIndex(u => u.username == userLogout.username);
+            var resLogoutUser = _dbcon.LogoutUser(userLogout.username);
 
-            if (id < 0) return BadRequest("There is no such users");
-            
-            userInfoList.ElementAt(id).isLogined = false;
+            if (resLogoutUser != null) return BadRequest(resLogoutUser);
 
             return Ok("User " + userLogout.username + " logout successfully");
         }
 
         //Logout пользователя владельца Tokena
         // DELETE api/user
-        [Authorize]
+        [MyAuthorize]
         [HttpDelete("token")]
         [MyActionConstraint(false)]
         public ActionResult<string> Delete()
         {
-            var id = CheckLogin();
-            switch (id)
+            if (_dbcon.FindUser(User.Identity.Name) == null)
             {
-                case -2: return BadRequest("There is no such users");
-                case -1: return Unauthorized();
+                return BadRequest("There is no such user");
             }
 
-            userInfoList.ElementAt(id).isLogined = false;
+            var resLogoutUser = _dbcon.LogoutUser(User.Identity.Name);
+
+            if (resLogoutUser != null) return BadRequest(resLogoutUser);
 
             return Ok("User " + User.Identity.Name + " logout successfully");
         }
